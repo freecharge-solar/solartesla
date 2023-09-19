@@ -1,6 +1,17 @@
 # solartesla
 Charge your Tesla for free using excess solar
 
+# Supported hardware
+
+## Cars
+
+* Tesla Model Y
+* Tesla Model 3
+
+## Solar inverters
+
+* SolarEdge
+
 # Config
 Configure your Tesla ID and token in config.py
 
