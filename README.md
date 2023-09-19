@@ -13,7 +13,11 @@ Charge your Tesla for free using excess solar
 * SolarEdge
 
 # Config
-Configure your Tesla ID and token in config.py
+Configure your Tesla and SolarEdge tokens in `config.py` starting from the sample:
+
+```
+cp config.py.sample config.py
+```
 
 # Example log
 
