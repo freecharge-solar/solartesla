@@ -292,10 +292,10 @@ class SolarExcessCharger:
         print(f"🏠{self.tesla.last_at_home}", end=" ")
         print("|", end=" ")
 
-        if pv_status == "Idle":
-            print("SKIP ∵ 🌙")
-            return
-
+        # if pv_status == "Idle":
+        #     print("SKIP ∵ 🌙")
+        #     return
+        #
         if not self.tesla.last_at_home:
             print("SKIP ∵ 🏠False")
             return
