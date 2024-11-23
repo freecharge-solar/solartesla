@@ -7,182 +7,8 @@ import requests
 import subprocess
 import time
 
-import warnings
-warnings.filterwarnings("ignore")
-
 # import logging
 # logging.basicConfig(level=logging.DEBUG, format="%(message)s")
-
-class TeslaAuth:
-    TOKEN_URL = "https://auth.tesla.com/oauth2/v3/token"
-    AUTHORIZE_URL = "https://auth.tesla.com/oauth2/v3/authorize"
-    AUDIENCE = "https://fleet-api.prd.na.vn.cloud.tesla.com"
-    CALLBACK = "https://freecharge-solar.github.io/index.html"
-
-    def __init__(self, tesla_client_id, tesla_client_secret):
-        self.tesla_client_id = tesla_client_id
-        self.tesla_client_secret = tesla_client_secret
-        self.session = requests.Session()
-        self.load()
-
-    def load(self):
-        try:
-            with open("token.json") as f:
-                self.token = json.loads(f.read())
-        except:
-            self.token = {"access_token": ""}
-
-    def save(self):
-        with open("token.json", "w") as f:
-            f.write(json.dumps(self.token))
-
-    def get_third_party_url(self):
-        response = self.session.get(self.AUTHORIZE_URL,
-                                     headers={"Content-Type": "application/x-www-form-urlencoded"},
-                                     params=f"client_id={self.tesla_client_id}&locale=en-US&prompt=login&redirect_uri={self.CALLBACK}&response_type=code&scope=openid%20offline_access%20user_data%20vehicle_device_data vehicle_cmds%20vehicle_charging_cmds&state=jaskldfjasdfasdf")
-        response.raise_for_status()
-        return response.request.url
-
-    def get_partner_access_token(self):
-        response = self.session.post(self.TOKEN_URL,
-                                     headers={"Content-Type": "application/x-www-form-urlencoded"},
-                                     data={"grant_type": "client_credentials",
-                                           "client_id": self.tesla_client_id,
-                                           "client_secret": self.tesla_client_secret,
-                                           "scope": "openid user_data vehicle_device_data vehicle_cmds vehicle_charging_cmds",
-                                           "audience": self.AUDIENCE})
-        response.raise_for_status()
-        json_response = response.json()
-        print(json_response)
-        partner_access_token = json_response["access_token"]
-        return partner_access_token
-
-    def get_third_party_token(self, code):
-        response = self.session.post(self.TOKEN_URL,
-                                     headers={"Content-Type": "application/x-www-form-urlencoded"},
-                                     data={"grant_type": "authorization_code",
-                                           "client_id": self.tesla_client_id,
-                                           "client_secret": self.tesla_client_secret,
-                                           "code": code,
-                                           "audience": self.AUDIENCE,
-                                           "redirect_uri": self.CALLBACK})
-        json_response = response.json()
-        # response.raise_for_status()
-        return json_response
-
-    def get_new_token(self):
-        # self.load()
-        response = self.session.post(self.TOKEN_URL,
-                                     headers={"Content-Type": "application/x-www-form-urlencoded"},
-                                     data={"grant_type": "refresh_token",
-                                           "client_id": self.tesla_client_id,
-                                           "refresh_token": self.token["refresh_token"]})
-        json_response = response.json()
-        response.raise_for_status()
-        self.token = json_response
-        self.save()
-        return json_response
-
-
-
-
-class TeslaAPI:
-    URL = "https://localhost"
-
-    def __init__(self, tesla_id, tesla_vin, tesla_auth, home=(0, 0)):
-        self.tesla_id = tesla_id
-        self.tesla_vin = tesla_vin
-        self.tesla_auth = tesla_auth
-        self.home = home
-
-        self.last_location = (0, 0)
-        self.last_at_home = None
-        self.last_disconnected = None
-        self.session = requests.Session()
-
-        access_token = self.tesla_auth.token["access_token"]
-        self.session.headers.update({"Authorization": f"Bearer {access_token}"})
-        self.session.verify = False
-
-    def get_new_access_token(self):
-        self.tesla_auth.get_new_token()
-        access_token = self.tesla_auth.token["access_token"]
-        self.session.headers.update({"Authorization": f"Bearer {access_token}"})
-
-    def list_vehicles(self):
-        url = f"{self.URL}/api/1/products"
-        response = self.session.get(url)
-        response.raise_for_status()
-        json_response = response.json()
-        return json_response
-
-    def honk_horn(self):
-        url = f"{self.URL}/api/1/vehicles/{self.tesla_vin}/command/honk_horn"
-        response = self.session.post(url)
-        response.raise_for_status()
-        json_response = response.json()
-        return json_response
-
-    def wake_up(self):
-        url = f"{self.URL}/api/1/vehicles/{self.tesla_vin}/wake_up"
-        response = self.session.post(url)
-        response.raise_for_status()
-        json_response = response.json()
-        return json_response
-
-    def set_charge_start(self):
-        url = f"{self.URL}/api/1/vehicles/{self.tesla_vin}/command/charge_start"
-        response = self.session.post(url)
-        response.raise_for_status()
-        json_response = response.json()
-        return json_response
-
-    def set_charge_stop(self):
-        url = f"{self.URL}/api/1/vehicles/{self.tesla_vin}/command/charge_stop"
-        response = self.session.post(url)
-        response.raise_for_status()
-        json_response = response.json()
-        return json_response
-
-    def set_charging_amps(self, amps):
-        url = f"{self.URL}/api/1/vehicles/{self.tesla_vin}/command/set_charging_amps"
-        # print(url)
-        response = self.session.post(url, json={"charging_amps": amps})
-        response.raise_for_status()
-        json_response = response.json()
-        return json_response
-
-    def get_vehicle_data(self):
-        url = f"{self.URL}/api/1/vehicles/{self.tesla_vin}/vehicle_data"
-        response = self.session.get(url, timeout=1, params={"endpoints": "charge_state;location_data"})
-        response.raise_for_status()
-        json_response = response.json()
-        self.get_vehicle_location(json_response)
-        charging_state = json_response["response"]["charge_state"]["charging_state"]
-        if charging_state == "Disconnected":
-            self.last_disconnected = True
-        else:
-            self.last_disconnected = False
-        return json_response
-
-    def get_charge_state(self, vehicle_data=None):
-        if vehicle_data is None:
-            vehicle_data = self.get_vehicle_data()
-        charge_amps = vehicle_data["response"]["charge_state"]["charge_amps"]
-        charger_actual_current = vehicle_data["response"]["charge_state"]["charger_actual_current"]
-        return charge_amps, charger_actual_current
-
-    def get_vehicle_location(self, vehicle_data=None):
-        if vehicle_data is None:
-            vehicle_data = self.get_vehicle_data()
-        latitude = vehicle_data["response"]["drive_state"]["latitude"]
-        longitude = vehicle_data["response"]["drive_state"]["longitude"]
-        if round(latitude, 3) == round(self.home[0], 3) and round(longitude, 3) == round(self.home[1], 3):
-            self.last_at_home = True
-        else:
-            self.last_at_home = False
-        self.last_location = latitude, longitude
-        return latitude, longitude
 
 
 class InvalidPowerFlow(Exception):
@@ -256,8 +82,7 @@ class SolarEdgeMonitoring:
 
 
 class SolarExcessCharger:
-    def __init__(self, solaredge_site, solaredge_key,
-                 tesla_id, tesla_vin, tesla_auth, home=(0, 0)):
+    def __init__(self, solaredge_site, solaredge_key):
         self.solaredge = SolarEdgeMonitoring(solaredge_site, solaredge_key)
         self.tesla_ble = TeslaBLE()
         self.time_of_last_start = 0
@@ -711,7 +536,6 @@ class TeslaBLE:
 
 if __name__ == '__main__':
     from config import *
-#    tesla_auth = TeslaAuth(TESLA_CLIENT_ID, TESLA_CLIENT_SECRET)
     tesla_auth = None
-    solartesla = SolarExcessCharger(SOLAREDGE_SITE, SOLAREDGE_KEY, TESLA_ID, TESLA_VIN, tesla_auth, home=(HOME_LATITUDE, HOME_LONGITUDE))
+    solartesla = SolarExcessCharger(SOLAREDGE_SITE, SOLAREDGE_KEY)
     solartesla.loop()
