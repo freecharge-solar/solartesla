@@ -87,13 +87,7 @@ class TeslaAuth:
 
 
 class TeslaAPI:
-    # URL = "https://127.0.0.1"
     URL = "https://localhost"
-    # URL = "https://fleet-api.prd.na.vn.cloud.tesla.com/"
-    # URL = "https://owner-api.teslamotors.com"
-    AUTH_URL = "https://auth.tesla.com/oauth2/v3/token"  # should be AUTH_TOKEN_URL
-    AUTH_AUTHORIZE_URL = "https://auth.tesla.com/oauth2/v3/authorize"
-    AUDIENCE = "https://fleet-api.prd.na.vn.cloud.tesla.com"
 
     def __init__(self, tesla_id, tesla_vin, tesla_auth, home=(0, 0)):
         self.tesla_id = tesla_id
@@ -152,20 +146,15 @@ class TeslaAPI:
 
     def set_charging_amps(self, amps):
         url = f"{self.URL}/api/1/vehicles/{self.tesla_vin}/command/set_charging_amps"
-        print(url)
+        # print(url)
         response = self.session.post(url, json={"charging_amps": amps})
-        print(response)
         response.raise_for_status()
         json_response = response.json()
         return json_response
 
     def get_vehicle_data(self):
         url = f"{self.URL}/api/1/vehicles/{self.tesla_vin}/vehicle_data"
-        #print(url)
         response = self.session.get(url, timeout=1, params={"endpoints": "charge_state;location_data"})
-        print(response)
-        print(response.headers)
-
         response.raise_for_status()
         json_response = response.json()
         self.get_vehicle_location(json_response)
@@ -270,7 +259,6 @@ class SolarExcessCharger:
     def __init__(self, solaredge_site, solaredge_key,
                  tesla_id, tesla_vin, tesla_auth, home=(0, 0)):
         self.solaredge = SolarEdgeMonitoring(solaredge_site, solaredge_key)
-#        self.tesla = TeslaAPI(tesla_id, tesla_vin, tesla_auth, home)
         self.tesla_ble = TeslaBLE()
         self.time_of_last_start = 0
         self.time_of_last_stop = 0
