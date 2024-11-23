@@ -422,7 +422,7 @@ class SolarExcessCharger:
         print(f"🎯{new_charge_amps}A", end=" ")
         print("|", end=" ")
 
-#        now = time.time()
+        now = time.time()
 #        if new_charge_amps > 0:
 #            self.time_of_last_sufficient = now
 #
