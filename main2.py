@@ -267,7 +267,7 @@ class SolarExcessCharger:
         self.time_of_last_positive = 0
         self.time_of_last_negative = 0
 
-        self.sleep_time_active = 20
+        self.sleep_time_active = 15
         self.sleep_time_idle = 300
         self.sleep_time = self.sleep_time_active
 
@@ -327,6 +327,7 @@ class SolarExcessCharger:
                 return
         except FailedToEnumerateDeviceServices:
             print("BLE Error")
+            self.sleep_time = 1
             return
         except HciDeviceBusy:
             print("HciDeviceBusy")
@@ -479,7 +480,7 @@ class SolarExcessCharger:
         charge_current_request_max = 32
 ########################
 
-        new_charge_amps = min(charge_current_request_max, max(5, new_charge_amps))
+        new_charge_amps = min(charge_current_request_max, max(5, new_charge_amps), math.floor(produced_current))
         try:
 
 #            if charging_state == "Stopped":
@@ -515,6 +516,7 @@ class SolarExcessCharger:
                 return
         except FailedToEnumerateDeviceServices:
             print("BLE Error")
+            self.sleep_time = 1
             return
         except HciDeviceBusy:
             print("HciDeviceBusy")
