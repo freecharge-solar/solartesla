@@ -527,6 +527,5 @@ class TeslaBLE:
 
 if __name__ == '__main__':
     from config import *
-    tesla_auth = None
     solartesla = SolarExcessCharger(SOLAREDGE_SITE, SOLAREDGE_KEY)
     solartesla.loop()

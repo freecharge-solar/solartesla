@@ -184,10 +184,6 @@ class TeslaAPI:
         return latitude, longitude
 
 
-class InvalidPowerFlow(Exception):
-    pass
-
-
 class SolarEdgeMonitoring:
 
     URL = "https://monitoringapi.solaredge.com"
@@ -196,7 +192,6 @@ class SolarEdgeMonitoring:
         self.site = site
         self.key = key
         self.session = requests.Session()
-        self.previousPowerFlow = None
 
     def reset(self):
         self.session.close()
@@ -230,12 +225,13 @@ class SolarEdgeMonitoring:
         response = self.session.get(f"{self.URL}/site/{self.site}/currentPowerFlow?api_key={self.key}")
         response.raise_for_status()
         json_response = response.json()
-        if json_response == self.previousPowerFlow:
-            # assume that the response is invalid if it is the same as the previous response
-            #raise InvalidPowerFlow()
-            pass  # 20/05/2024  disabled above due to getting a lot of these and Tesla timeouts, need to keep trying
-        self.previousPowerFlow = json_response
         return json_response
+
+    def check_status(self, currentPowerFlow=None):
+        if currentPowerFlow is None:
+            currentPowerFlow = self.get_site_currentPowerFlow()
+        pv_status = currentPowerFlow["siteCurrentPowerFlow"]["PV"]["status"]
+        return pv_status
 
     def check_production(self, currentPowerFlow=None):
         if currentPowerFlow is None:
@@ -270,14 +266,9 @@ class SolarExcessCharger:
     def runonce(self):
         print(f"{datetime.now().isoformat(timespec='seconds')}", end=" | ")
 
-        try:
-            currentPowerFlow = self.solaredge.get_site_currentPowerFlow()
-            # print(currentPowerFlow)
-        except InvalidPowerFlow:
-            print("ABORT due to invalid solar data")
-            return
+        currentPowerFlow = self.solaredge.get_site_currentPowerFlow()
 
-        pv_status = currentPowerFlow["siteCurrentPowerFlow"]["PV"]["status"]
+        pv_status = self.solaredge.check_status(currentPowerFlow)
         if pv_status == "Idle":
             self.sleep_time = self.sleep_time_idle
         else:
@@ -438,6 +429,7 @@ class SolarExcessCharger:
 
     def loop(self):
         while True:
+            start_time = time.time()
             try:
                 self.runonce()
             except requests.exceptions.HTTPError as e:
@@ -456,7 +448,10 @@ class SolarExcessCharger:
                     print(str(e))
             except requests.exceptions.ConnectionError as e:
                 print(str(e))
-            time.sleep(self.sleep_time)
+            elapsed_time = time.time() - start_time
+            sleep_time = max(0, self.sleep_time - elapsed_time)
+            time.sleep(sleep_time)
+
 
 
 if __name__ == '__main__':
