@@ -498,7 +498,7 @@ class SolarExcessCharger:
                 print("")
         except FailedToFindBleBeacon:
             print("🏠False | SKIP ∵ 🏠False")
-            self.tesla_ble.reset()
+            # self.tesla_ble.reset()  # 23/11/2024 don't reset, because we should actually be at home!
             return
         except CouldntVerifySuccess:
             print(f"🏠True | 🚗💤 |", end=" ")
