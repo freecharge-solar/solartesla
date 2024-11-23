@@ -54,6 +54,12 @@ class SolarEdgeMonitoring:
         json_response = response.json()
         return json_response
 
+    def check_status(self, currentPowerFlow=None):
+        if currentPowerFlow is None:
+            currentPowerFlow = self.get_site_currentPowerFlow()
+        pv_status = currentPowerFlow["siteCurrentPowerFlow"]["PV"]["status"]
+        return pv_status
+
     def check_production(self, currentPowerFlow=None):
         if currentPowerFlow is None:
             currentPowerFlow = self.get_site_currentPowerFlow()
@@ -91,7 +97,7 @@ class SolarExcessCharger:
 
         currentPowerFlow = self.solaredge.get_site_currentPowerFlow()
 
-        pv_status = currentPowerFlow["siteCurrentPowerFlow"]["PV"]["status"]
+        pv_status = self.solaredge.check_status(currentPowerFlow)
         if pv_status == "Idle":
             self.sleep_time = self.sleep_time_idle
         else:
