@@ -11,10 +11,6 @@ import time
 # logging.basicConfig(level=logging.DEBUG, format="%(message)s")
 
 
-class InvalidPowerFlow(Exception):
-    pass
-
-
 class SolarEdgeMonitoring:
 
     URL = "https://monitoringapi.solaredge.com"
@@ -23,7 +19,6 @@ class SolarEdgeMonitoring:
         self.site = site
         self.key = key
         self.session = requests.Session()
-        self.previousPowerFlow = None
 
     def reset(self):
         self.session.close()
@@ -57,11 +52,6 @@ class SolarEdgeMonitoring:
         response = self.session.get(f"{self.URL}/site/{self.site}/currentPowerFlow?api_key={self.key}")
         response.raise_for_status()
         json_response = response.json()
-        if json_response == self.previousPowerFlow:
-            # assume that the response is invalid if it is the same as the previous response
-            #raise InvalidPowerFlow()
-            pass  # 20/05/2024  disabled above due to getting a lot of these and Tesla timeouts, need to keep trying
-        self.previousPowerFlow = json_response
         return json_response
 
     def check_production(self, currentPowerFlow=None):
@@ -99,12 +89,7 @@ class SolarExcessCharger:
     def runonce(self):
         print(f"{datetime.now().isoformat(timespec='seconds')}", end=" | ")
 
-        try:
-            currentPowerFlow = self.solaredge.get_site_currentPowerFlow()
-            # print(currentPowerFlow)
-        except InvalidPowerFlow:
-            print("ABORT due to invalid solar data")
-            return
+        currentPowerFlow = self.solaredge.get_site_currentPowerFlow()
 
         pv_status = currentPowerFlow["siteCurrentPowerFlow"]["PV"]["status"]
         if pv_status == "Idle":
