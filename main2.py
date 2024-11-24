@@ -112,239 +112,55 @@ class SolarExcessCharger:
         excess_current = self.solaredge.check_excess(currentPowerFlow)
         print(f"{excess_current:+.2f}A", end=" | ")
 
+        if pv_status == "Idle":
+            ## ideally, check if vehicle is still charging and stop it
+            ## however, for now, just skip because we can't start/stop anyways
+            print("SKIP ∵ 🌙")
+            return
 
         try:
             self.tesla_ble.guess_state()
-        except FailedToFindBleBeacon:
-            print("🏠False | SKIP ∵ 🏠False")
-            self.tesla_ble.reset()
-            return
-        except CouldntVerifySuccess:
-            print(f"🏠True | 🚗💤 |", end=" ")
-#            self.tesla_ble.reset()
-            if pv_status == "Idle":
-                print("SLEEP ∵ 🌙")
-                return
-            elif self.tesla_ble.charge_state == "Disconnected":
-                print("SLEEP ∵ ⚡Disconnected")
-                return
-            elif produced_current > 5:
-                print("WAKEUP ∵ 🏠True and ☀️>5A")
-                try:
-                    p = self.tesla_ble.wake()
-#                    print(p)
-                except Exception as e:
-                    print("Can't wake up: ", e)
-                    return
-                self.sleep_time = 5
-                return
-            else:
-                print("SLEEP ∵ 🏠True and ☀️<=5A")
-                return
-        except FailedToEnumerateDeviceServices:
-            print("BLE Error")
-            self.sleep_time = 1
-            return
-        except HciDeviceBusy:
-            print("HciDeviceBusy")
-            self.tesla_ble.hciconfig_up()
-            return
-        except UnknownError as e:
-            print("Unknown Error: ", e)
-            return
         except subprocess.TimeoutExpired as e:
             print("TimeoutExpired:", e)
             return
-
-#
-#        charger_actual_current = vehicle_data["response"]["charge_state"]["charger_actual_current"]
-#        charge_amps = vehicle_data["response"]["charge_state"]["charge_amps"]
-#        battery_level = vehicle_data["response"]["charge_state"]["battery_level"]
-#        battery_range = vehicle_data["response"]["charge_state"]["battery_range"]
-#        charger_voltage = vehicle_data["response"]["charge_state"]["charger_voltage"]
-#        charge_current_request_max = vehicle_data["response"]["charge_state"]["charge_current_request_max"]
-#        charge_limit_soc = vehicle_data["response"]["charge_state"]["charge_limit_soc"]
-#        charging_state = vehicle_data["response"]["charge_state"]["charging_state"]  # "Charging" "Stopped" "Disconnected"
-#        charger_power = vehicle_data["response"]["charge_state"]["charger_power"]
-#        minutes_to_full_charge = vehicle_data["response"]["charge_state"]["minutes_to_full_charge"]
-#        charge_energy_added = vehicle_data["response"]["charge_state"]["charge_energy_added"]
-#        charge_miles_added_rated = vehicle_data["response"]["charge_state"]["charge_miles_added_rated"]
-#        charger_phases = vehicle_data["response"]["charge_state"]["charger_phases"]
-#
-##        print("🔋" if battery_level > 40 else "🪫", end="")
-##        print(f"{battery_level}%/{1.609344 * battery_range:.0f}km", end=" ")
-##        print(f"⚡{charging_state}", end=" ")
-##
-##        if charging_state != "Disconnected" and charging_state is not None:
-##            # Charging, Stopped, Complete, Starting
-##            print(f"{charger_actual_current}/{charge_amps}/{charge_current_request_max}A", end=" ")
-##            print(f"{charge_limit_soc}%", end=" ")
-##
-##        if charging_state == "Charging" or charging_state == "Starting":
-##            print(f"{charger_power}kW", end=" ")
-##            print(f"{charger_voltage}V", end=" ")
-##            if charger_phases == 2:
-##                print("❸", end=" ")
-##            else:
-##                print(f"({charger_phases})", end=" ")
-##            print(f"+{charge_energy_added}kWh/{1.609344 * charge_miles_added_rated:.0f}km", end=" ")
-##            h, m = divmod(minutes_to_full_charge, 60)
-##            print(f"{h}h" if h else "", end="")
-##            print(f"{m}m", end=" ")
-##
-##        print("|", end=" ")
-#
-        print(f"🏠True", end=" ")
-        print("|", end=" ")
-#
-#        # if pv_status == "Idle":
-#        #     print("SKIP ∵ 🌙")
-#        #     return
-#        #
-#        if not self.tesla.last_at_home:
-#            print("SKIP ∵ 🏠False")
-#            return
-#
-#        if charging_state == "Disconnected":
-#            print("SKIP ∵ ⚡Disconnected")
-#            return
-#
-#        if charging_state == "Complete":
-#            print("SKIP ∵ ⚡Complete")
-#            return
-#
-#        if charging_state is None:
-#            print("SKIP ∵ ⚡None")
-#            return
-#
-
-#################
-#        charge_amps = 10
-        charge_amps = self.tesla_ble.charge_amps
-        charging_state = self.tesla_ble.charge_state
-        charger_actual_current = charge_amps
-
-        if charging_state == "Disconnected":
-            print("SKIP ∵ ⚡Disconnected")
+        
+        if not self.tesla_ble.home:
+            print("🏠False | SKIP ∵ 🏠False")
+            self.tesla_ble.reset()
             return
+        else:
+            print(f"🏠True", end=" ")
+            if self.tesla_ble.sleeping:
+                ## ideally, check if vehicle needs to be awoken to check if need to start/stop
+                ## however, for now, just skip because we can't start/stop anyways
+                print(f"| 🚗💤")
+                return
+            elif self.tesla_ble.cable_state == "Disconnected":
+                print("SKIP ∵ ⚡Disconnected")
+                return
 
-        if charging_state == "Stopped":
-            print("jalksdfajsfdl")
-            charger_actual_current = 0
+        print("|", end=" ")
 
-#################
+        charge_amps = self.tesla_ble.charge_amps
+        charger_actual_current = charge_amps
 
         new_charge_amps = math.floor(charger_actual_current + excess_current)
         print(f"🎯{new_charge_amps}A", end=" ")
         print("|", end=" ")
 
-        now = time.time()
-#        if new_charge_amps > 0:
-#            self.time_of_last_sufficient = now
-#
-#        if excess_current > 0:
-#            self.self.time_of_last_positive = now
-#        else:
-#            self.time_of_last_negative = now
-#
-#        if now - self.time_of_last_positive > 600:
-#            # it's been more than 600 seconds since we had positive solar excess, so stop charging
-#            self.tesla_ble.charging_stop()
-#        elif now - self.time_of_last_negative > 600:
-#            # it's been more than 600 seconds since we had negative solar excess, so start charging
-#            self.tesla_ble.charging_start()
-
-
-        #### DANGER WE DON'T WANT FREQUENT START STOP CHARGE AS THIS MAY WEAR OUT CAR CHARGER
-        if charging_state == "Stopped":
-            if new_charge_amps < 5:
-                print("🎯<5A Not enough solar to start", end="")
-            else:
-                print("🎯>=5A ⏯️", end=" ")
-                timer = 600 - (now - self.time_of_last_stop)
-                if timer <= 0:
-                    print("⌛now", end=", ")
-#                    self.tesla.set_charge_start()
-#                    self.tesla_ble.charging_start()
-                    self.time_of_last_start = time.time()
-                else:
-                    m, s = divmod(int(timer), 60)
-                    print("⏳", end="")
-                    print(f"{m}m" if m else "", end="")
-                    print(f"{s}s", end="")
-
-        elif charging_state == "Charging" or charging_state == "Starting":
-            if new_charge_amps > 0:
-                print("🎯>0A 🆗", end="")
-            else:
-                print("🎯<=0A ⏹️", end=" ")
-                timer = 600 - (now - self.time_of_last_sufficient)
-                if timer <= 0:
-                    print(f"⌛now", end="")
-#                    self.tesla.set_charge_stop()
-#                    self.tesla_ble.charging_stop()
-                    self.time_of_last_stop = time.time()
-                else:
-                    m, s = divmod(int(timer), 60)
-                    print("⏳", end="")
-                    print(f"{m}m" if m else "", end="")
-                    print(f"{s}s", end="")
-        #### DANGER
-
-
-########################
         charge_current_request_max = 32
-########################
 
         new_charge_amps = min(charge_current_request_max, max(5, new_charge_amps), math.floor(produced_current))
         try:
-
-#            if charging_state == "Stopped":
-#                print("")
-#                p = self.tesla_ble.ping()
-#                return
-
-
-            if True or new_charge_amps != charge_amps:  # always set amps, even if unchanged, because we don't really know what we're currently charging at with BLE
-                print(" |", end=" ")
-                p = self.tesla_ble.charging_set_amps(new_charge_amps)
+            p = self.tesla_ble.guess_charging_set_amps(new_charge_amps)
+            if p.returncode == 0:
                 print(f"⚡→{new_charge_amps}A")
             else:
-#                p = self.tesla_ble.ping()
-                print("")
-        except FailedToFindBleBeacon:
-            print("🏠False | SKIP ∵ 🏠False")
-            # self.tesla_ble.reset()  # 23/11/2024 don't reset, because we should actually be at home!
-            return
-        except CouldntVerifySuccess:
-            print(f"🏠True | 🚗💤 |", end=" ")
-            self.tesla_ble.reset()
-            if pv_status == "Idle":
-                print("SLEEP ∵ 🌙")
-                return
-            elif produced_current > 5:
-                print("WAKEUP ∵ 🏠True and ☀️>5A")
-#                p = self.tesla_ble.wake()
-                self.sleep_time = 5
-                return
-            else:
-                print("SLEEP ∵ 🏠True and ☀️<=5A")
-                return
-        except FailedToEnumerateDeviceServices:
-            print("BLE Error")
-            self.sleep_time = 1
-            return
-        except HciDeviceBusy:
-            print("HciDeviceBusy")
-            self.tesla_ble.hciconfig_up()
-            return
-        except UnknownError as e:
-            print("Unknown Error: ", e)
-            return
+                print(f"⚡→{new_charge_amps}A??")
+                print(p.stderr)
         except subprocess.TimeoutExpired as e:
             print("TimeoutExpired:", e)
             return
-
 
     def loop(self):
         while True:
@@ -360,9 +176,6 @@ class SolarExcessCharger:
                     print("HTTP 500 Server Error: Resetting connection")
                     self.solaredge.reset()
                     time.sleep(60)
-#                elif e.response.status_code == 401:
-#                    print("🚗 HTTP 401 Unauthorized: Getting new access token")
-#                    self.tesla.get_new_access_token()
                 else:
                     print(str(e))
             except requests.exceptions.ConnectionError as e:
@@ -400,29 +213,102 @@ class TeslaBLE:
 #        self.charge_amps = 0
 
     def reset(self):
+        self.home = None
+        self.sleeping = None
+        self.cable_state = None
         self.charge_amps = None
-        self.charge_state = None
 
     def guess_state(self):
         # charge_port_close() is gives good clues about charging state
-        p = self.charge_port_close()
-        if self.charge_amps is None:
-            p = self.charging_set_amps(5)
-            if p.returncode == 0:
-                self.charge_amps = 5
+        # BLE close-charge-port can give some clues about the vehicle state
+        # 
+        # Home or Away
+        #   Home + (Awake or Sleeping)
+        #   Home + Awake + (Disconnected or Connected)
+        #
+        # FailedToFindBleBeacon means Away
+        # CouldntVerifySuccess means Sleeping
+        #
+        # Only 3 states:
+        # AWAY, AWAKE or SLEEPING
+        #
+        p = self.run_retryIfCommonError(5, self.charge_port_close)
 
-    def run_retry(self, retry, *args, **kwargs):
+        if p.returncode == 0:
+            # successfully closed charge port, so must be disconnected at home
+            self.home = True
+            self.sleeping = False
+            self.cable_state = "Disconnected"
+        elif p.stderr.startswith(b"Failed to execute command: car could not execute command: already closed"):
+            # charge port already closed, so must be disconnected at home
+            self.home = True
+            self.sleeping = False
+            self.cable_state = "Disconnected"
+        elif p.stderr.startswith(b"Failed to execute command: car could not execute command: cable connected"):
+            # must be connected at home, but don't know if charging or stopped
+            self.home = True
+            self.sleeping = False
+            self.cable_state = "Connected"
+        elif p.stderr.startswith(b"Couldn't verify success: context deadline exceeded") or \
+             p.stderr.startswith(b"Error: context deadline exceeded"):
+            # this happens when car is sleeping
+            self.home = True
+            self.sleeping = True
+        elif p.stderr.startswith(b"Error: failed to find BLE beacon"):
+            # probably not at home, but should try a few times in case we have bad signal
+            self.home = False
+        else:
+            # unknown state
+            print(p.stderr)
+
+        if self.charge_amps is None:
+            p = self.guess_charging_set_amps(5)
+
+    def guess_charging_set_amps(self, amps):
+        p = self.run_retryIfCommonError(5, lambda: self.charging_set_amps(amps))
+
+        if p.returncode == 0:
+            # successfully set charging amps, so charge_amps is known
+            # however this is not an indication that the car is connected because it returns 0 even when the car is disconnected
+            # it is also not an indication that the car is charging because it returns 0 even when charging is stopped
+            self.charge_amps = amps
+
+        return p
+
+    def run_retryIfCommonError(self, retry, func):
+        # robustly run the bluetooth command (it is quite unreliable without this)
+        # retries on common errors, but always passes through the command result
         attempt = 0
+        p = None
         while attempt <= retry:
-            p = subprocess.run(*args, **kwargs)
-#            print(attempt + 1, end=": ")
-#            print(p)
-            if p.stderr.startswith(b"Error: ble: failed to enumerate device services"):
-#                print("retry")
+            p = func()
+            if p.returncode == 0:
+                # success!
+                return p
+            elif p.stderr.startswith(b"Error: failed to find a BLE device: can't init hci: no devices available: (hci0: can't down device: device or resource busy)"):
+                # this happens sometimes unexpectedly, and need to reset bluetooth
+                # note this is different to "can't up device", which does not need bluetooth reset
+                print("Retry: need bluetooth reset")
+                print(p.stderr)
+                self.hciconfig_up()
+                attempt += 0 # don't count this as an attempt
+                continue
+            elif p.stderr.startswith(b"Error: ble: failed to enumerate device services") or \
+                 p.stderr.startswith(b"Error: ble: couldn't fetch descriptors: ATT request failed: input channel closed: io: read/write on closed pipe") or \
+                 p.stderr.startswith(b"Error: ble: failed to discover service characteristics: ATT request failed: input channel closed: io: read/write on closed pipe") or \
+                 p.stderr.startswith(b"Failed to execute command: ATT request failed: input channel closed: io: read/write on closed pipe") or \
+                 p.stderr.startswith(b"Error: failed to find a BLE device: can't init hci: no devices available: (hci0: can't up device: connection timed out)") or \
+                 p.stderr.startswith(b"Error: failed to find a BLE device: can't init hci: no devices available: (hci0: can't up device: interrupted system call)"):
+                # these happen sometimes unexpectedly, it seems to be a computer problem rather than car problem
+                # print("Retry: known error")  ## DEBUG only
+                # print(p.stderr)  ## DEBUG only
+                print(attempt, end=" ")
                 attempt += 1
                 continue
             else:
-                break
+                # unknown error, pass through the result
+                return p
+        # exhausted retries, pass through the result
         return p
 
     def hciconfig_up(self):
@@ -430,102 +316,18 @@ class TeslaBLE:
         print(p)
         return p
 
-    def ping(self, retry=1):
-        p = self.run_retry(retry, ["tesla-control", "-ble", "ping"], capture_output=True, timeout=30)
-        self.raise_for_status(p)
+    def charge_port_close(self):
+        ## Note we're going to change the design so that these direct issued commands are simple, and wrapping retry and parsing results is outside
+        ## these commands should not change vehicle state model
+        p = subprocess.run(["tesla-control", "-ble", "charge-port-close"], capture_output=True, timeout=30)
         return p
 
-    def charge_port_close(self, retry=1):
-        p = self.run_retry(retry, ["tesla-control", "-ble", "charge-port-close"], capture_output=True, timeout=30)
-
-        if p.returncode == 0:
-            # successfully closed charge port, so must be disconnected
-            self.charge_stats = "Disconnected"
-            return p
-        elif p.stderr.startswith(b"Failed to execute command: car could not execute command: already closed"):
-            # charge port already closed, so must be disconnected
-            self.charge_state = "Disconnected"
-            return p
-        elif p.stderr.startswith(b"Failed to execute command: car could not execute command: cable connected"):
-            # must be connected, but don't know if charging or stopped
-            self.charge_state = "Connected"
-            return p
-
-        self.raise_for_status(p)
+    def charging_set_amps(self, amps):
+        p = subprocess.run(["tesla-control", "-ble", "charging-set-amps", str(amps)], capture_output=True, timeout=30)
         return p
 
-    def charging_stop(self, retry=1):
-        p = self.run_retry(retry, ["tesla-control", "-ble", "charging-stop"], capture_output=True, timeout=30)
 
-        if p.returncode == 0:
-            # must be connected and charging, action to stop charging
-            self.charge_state = "Stopped"
-            return p
-        elif p.stderr.startswith(b"Failed to execute command: car could not execute command: not_charging"):
-            # must be connected and not charging, no action, so either stopped or completed
-            self.charge_state = "Stopped"
-            return p
-
-        self.raise_for_status(p)
-        return p
-
-    def charging_start(self, retry=1):
-        p = self.run_retry(retry, ["tesla-control", "-ble", "charging-start"], capture_output=True, timeout=30)
-
-        if p.returncode == 0:
-            # must be connected and not charging, action to start charging
-            self.charge_state = "Charging"
-            return p
-        elif p.stderr.startswith(b"Failed to execute command: car could not execute command: complete"):
-            # must be connected and not charging, no action, so either stopped or completed
-            self.charge_state = "Stopped"
-            return p
-
-        self.raise_for_status(p)
-        return p
-
-    def charging_set_amps(self, amps, retry=1):
-        p = self.run_retry(retry, ["tesla-control", "-ble", "charging-set-amps", str(amps)], capture_output=True, timeout=30)
-
-        if p.returncode == 0:
-            self.charge_amps = amps
-            return p
-        elif p.stderr.startswith(b"Failed to execute command: car could not execute command: SetChargingAmps failed"):
-            # unknown why sometimes SetChargingAmps will fail
-            return p
-
-        self.raise_for_status(p)
-        return p
-
-    def wake(self, retry=1):
-        p = self.run_retry(retry, ["tesla-control", "-ble", "wake"], capture_output=True, timeout=30)
-#        self.raise_for_status(p)
-        return p
-
-    def raise_for_status(self, p):
-        if p.returncode != 0:
-            if p.stderr.startswith(b"Error: ble: failed to enumerate device services"):
-                # this happens sometimes unexpectedly, it seems to be a computer problem rather than car problem
-                raise FailedToEnumerateDeviceServices(p.stderr)
-            elif p.stderr.startswith(b"Error: failed to find BLE beacon"):
-                # this happens when car is too far away
-                raise FailedToFindBleBeacon(p.stderr)
-            elif p.stderr.startswith(b"Couldn't verify success: context deadline exceeded"):
-                # this happens when car is sleeping
-                raise CouldntVerifySuccess(p.stderr)
-            elif p.stderr.startswith(b"Error: context deadline exceeded"):
-                # this happens when car is sleeping
-                raise CouldntVerifySuccess(p.stderr)
-            elif p.stderr.startswith(b"Error: failed to find a BLE device: can't init hci: no devices available: (hci0: can't down device: device or resource busy)"):
-                # this happens sometimes unexpectedly, and need to reset bluetooth
-                raise HciDeviceBusy(p.stderr)
-            else:
-                raise UnknownError(p.stderr)
-
-
-
-
-if __name__ == '__main__':
+if __name__ == '__main__': 
     from config import *
     solartesla = SolarExcessCharger(SOLAREDGE_SITE, SOLAREDGE_KEY)
     solartesla.loop()
