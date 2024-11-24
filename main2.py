@@ -110,6 +110,8 @@ class SolarExcessCharger:
         # {'siteCurrentPowerFlow': {'updateRefreshRate': 3, 'unit': 'kW', 'connections': [{'from': 'GRID', 'to': 'Load'}], 'GRID': {'status': 'Active', 'currentPower': 0.55}, 'LOAD': {'status': 'Active', 'currentPower': 0.55}, 'PV': {'status': 'Idle', 'currentPower': 0.0}}}
 
         excess_current = self.solaredge.check_excess(currentPowerFlow)
+        load_current = produced_current - excess_current
+        print(f"💡{load_current:.2f}A", end=" ")
         print(f"{excess_current:+.2f}A", end=" | ")
 
         if pv_status == "Idle":
@@ -141,14 +143,27 @@ class SolarExcessCharger:
 
         print("|", end=" ")
 
+        charge_current_request_max = 32
+
         charge_amps = self.tesla_ble.charge_amps
+        if charge_amps is None:
+            print("Warning: charge_amps is None, assuming 5A")
+            charge_amps = 5
         charger_actual_current = charge_amps
+        # with BLE, we don't actually know charger_actual_current, so we just assume it
+        if charger_actual_current > load_current:
+            print(f"⚡Stopped?", end=" ")
+            # print("Probably not charging because charger_actual_current > home_current")
+            # print("Setting charger_actual_current to 0")
+            charger_actual_current = 0
+        else:
+            print(f"⚡Charging?", end=" ")
+
+        print(f"{charger_actual_current}/{charge_amps}/{charge_current_request_max}A", end=" | ")
 
         new_charge_amps = math.floor(charger_actual_current + excess_current)
         print(f"🎯{new_charge_amps}A", end=" ")
         print("|", end=" ")
-
-        charge_current_request_max = 32
 
         new_charge_amps = min(charge_current_request_max, max(5, new_charge_amps), math.floor(produced_current))
         try:
@@ -157,7 +172,6 @@ class SolarExcessCharger:
                 print(f"⚡→{new_charge_amps}A")
             else:
                 print(f"⚡→{new_charge_amps}A??")
-                print(p.stderr)
         except subprocess.TimeoutExpired as e:
             print("TimeoutExpired:", e)
             return
@@ -171,7 +185,7 @@ class SolarExcessCharger:
                 if e.response.status_code == 429:
                     print("HTTP 429 Too Many Requests: Resetting connection")
                     self.solaredge.reset()
-                    time.sleep(60)
+                    time.sleep(30)
                 elif e.response.status_code == 500:
                     print("HTTP 500 Server Error: Resetting connection")
                     self.solaredge.reset()
@@ -262,7 +276,11 @@ class TeslaBLE:
             print(p.stderr)
 
         if self.charge_amps is None:
-            p = self.guess_charging_set_amps(5)
+            for _ in range(5):
+                # retry up to 5 times
+                p = self.guess_charging_set_amps(5)
+                if p.returncode == 0:
+                    break
 
     def guess_charging_set_amps(self, amps):
         p = self.run_retryIfCommonError(5, lambda: self.charging_set_amps(amps))
@@ -272,6 +290,9 @@ class TeslaBLE:
             # however this is not an indication that the car is connected because it returns 0 even when the car is disconnected
             # it is also not an indication that the car is charging because it returns 0 even when charging is stopped
             self.charge_amps = amps
+        elif not p.stderr.startswith(b"Error: failed to find BLE beacon"):
+            print("Unknown Error:")
+            print(p.stderr)
 
         return p
 
@@ -314,6 +335,7 @@ class TeslaBLE:
     def hciconfig_up(self):
         p = subprocess.run(["sudo", "hciconfig", "hci0", "down"], capture_output=True, timeout=30)
         print(p)
+        time.sleep(1)
         return p
 
     def charge_port_close(self):
