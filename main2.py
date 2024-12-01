@@ -81,12 +81,7 @@ class SolarExcessCharger:
     def __init__(self, solaredge_site, solaredge_key):
         self.solaredge = SolarEdgeMonitoring(solaredge_site, solaredge_key)
         self.tesla_ble = TeslaBLE()
-        self.time_of_last_start = 0
-        self.time_of_last_stop = 0
-        self.time_of_last_sufficient = 0
-
-        self.time_of_last_positive = 0
-        self.time_of_last_negative = 0
+        self.charge_manager = ChargingManager()
 
         self.sleep_time_active = 15
         self.sleep_time_idle = 300
@@ -143,21 +138,61 @@ class SolarExcessCharger:
 
         print("|", end=" ")
 
+                
+        ### In the case of manually stopping charging from Tesla App ...
+        ### We guess that charging has stopped when the charge_amps set is more than the load_current(amps) used by the entire house
+        ### When we guess that charging has stopped, we can actually issue a charge_stop command
+        ### The charge_stop command will output stderr to confirm that charging has indeed stopped:
+        ### Failed to execute command: car could not execute command: not_charging
+        ### If the charging was not actually stopped, that will force it to stop anyways
+        ### So we should be confident that the state is actually stopped
+        ###
+        ### In the case of manually starting charging from Tesla App ...
+        ### Unfortunately, we don't have a way to guess that charging has started.
+        ###
+        ### So maybe the algorithm should just not care about the state of charging or stopped
+        ### As in, the algorithm explicitly sends start and stop commands to determine the state 
+        ### A simple rule would be to always issue a stop command when solar generation is idle
+        ### Another simple rule would be to issue a stop command when target charge amps is 5A and negative excess for 5 minutes
+        ### That way, even if manually starting charging from Tesla App, the algorithm ends up stopping if necessary
+        ###
+        ### Every 15 seconds:
+        ### If the last 5 minutes have been positive excess (>5A), then start charging
+        ### If the last 5 minutes have been negative excess (<0A), then stop charging
+        ### Note: The charge rate is automatically adjusted each cycle too
+        ###
+        ### One complication is we want to minimise the number of BLE commands to send each cycle.
+        ### Currently we already send 2 BLE commands: one to guess state, and one to guess set charge amps
+        ### Think of a way to achieve start/stop when needed, but without issuing 3 commands in the cycle
+        ### It's ok to send 3 commands if it is seldom, but keep regular cycles to 2 commands only
+        ###
+        ### What could go wrong?
+        ### Need to make sure we don't flip-flop between charging and stopped because it is probably bad for the car
+        ### 5 minutes positive, start charging, 5 minutes negative, stop charging, 5 minutes positive, start charging
+        ###
+
         charge_current_request_max = 32
 
         charge_amps = self.tesla_ble.charge_amps
         if charge_amps is None:
             print("Warning: charge_amps is None, assuming 5A")
             charge_amps = 5
+
+        print(f"⚡{self.tesla_ble.charge_state}", end=" ")
         charger_actual_current = charge_amps
         # with BLE, we don't actually know charger_actual_current, so we just assume it
         if charger_actual_current > load_current:
-            print(f"⚡Stopped?", end=" ")
+            print(f"?", end="")
             # print("Probably not charging because charger_actual_current > home_current")
             # print("Setting charger_actual_current to 0")
-            charger_actual_current = 0
+            # charger_actual_current = 0
+            charger_actual_current = math.floor(load_current)
         else:
-            print(f"⚡Charging?", end=" ")
+            pass
+            # print(f"⚡Charging?", end=" ")
+
+        if self.tesla_ble.charge_state == "Stopped":
+            charger_actual_current = 0
 
         print(f"{charger_actual_current}/{charge_amps}/{charge_current_request_max}A", end=" | ")
 
@@ -165,11 +200,21 @@ class SolarExcessCharger:
         print(f"🎯{new_charge_amps}A", end=" ")
         print("|", end=" ")
 
-        new_charge_amps = min(charge_current_request_max, max(5, new_charge_amps), math.floor(produced_current))
+        # This block determines whether to start/stop charging
+        action = self.charge_manager.update(excess_current)
+        if action == "START":
+            print("START!", end=" ")
+            self.tesla_ble.guess_charging_start()
+        elif action == "STOP":
+            print("STOP!", end=" ")
+            self.tesla_ble.guess_charging_stop()
+            
+        new_charge_amps = min(charge_current_request_max, max(0, new_charge_amps), math.floor(produced_current))
         try:
             p = self.tesla_ble.guess_charging_set_amps(new_charge_amps)
             if p.returncode == 0:
                 print(f"⚡→{new_charge_amps}A")
+                time.sleep(3)  # always wait a few seconds after setting charging amps, to prevent immediate checking of usage before it is applied to vehicle and before solar monitor updates
             else:
                 print(f"⚡→{new_charge_amps}A??")
         except subprocess.TimeoutExpired as e:
@@ -231,6 +276,7 @@ class TeslaBLE:
         self.sleeping = None
         self.cable_state = None
         self.charge_amps = None
+        self.charge_state = None
 
     def guess_state(self):
         # charge_port_close() is gives good clues about charging state
@@ -275,7 +321,7 @@ class TeslaBLE:
             # unknown state
             print(p.stderr)
 
-        if self.charge_amps is None:
+        if self.home and self.charge_amps is None:
             for _ in range(5):
                 # retry up to 5 times
                 p = self.guess_charging_set_amps(5)
@@ -290,11 +336,24 @@ class TeslaBLE:
             # however this is not an indication that the car is connected because it returns 0 even when the car is disconnected
             # it is also not an indication that the car is charging because it returns 0 even when charging is stopped
             self.charge_amps = amps
-        elif not p.stderr.startswith(b"Error: failed to find BLE beacon"):
+        elif not p.stderr.startswith(b"Error: failed to find BLE beacon") and \
+             not p.stderr.startswith(b"Couldn't verify success: context deadline exceeded"):
             print("Unknown Error:")
             print(p.stderr)
 
         return p
+
+    def guess_charging_start(self):
+        p = self.run_retryIfCommonError(5, self.charging_start)
+        self.charge_state = "Charging"
+        print(p.stderr)
+        print(p.returncode)
+
+    def guess_charging_stop(self):
+        p = self.run_retryIfCommonError(5, self.charging_stop)
+        self.charge_state = "Stopped"
+        print(p.stderr)
+        print(p.returncode)
 
     def run_retryIfCommonError(self, retry, func):
         # robustly run the bluetooth command (it is quite unreliable without this)
@@ -347,6 +406,42 @@ class TeslaBLE:
     def charging_set_amps(self, amps):
         p = subprocess.run(["tesla-control", "-ble", "charging-set-amps", str(amps)], capture_output=True, timeout=30)
         return p
+
+    def charging_start(self):
+        p = subprocess.run(["tesla-control", "-ble", "charging-start"], capture_output=True, timeout=30)
+        return p
+
+    def charging_stop(self):
+        p = subprocess.run(["tesla-control", "-ble", "charging-stop"], capture_output=True, timeout=30)
+        return p
+
+
+class ChargingManager:
+    def __init__(self):
+        self.low_threshold = 0.0  # amps  ## 0.0
+        self.high_threshold = 4.0  # amps  ## 4.0   0.1
+
+        self.prev_time = None
+        self.prev_direction = None  # 0, -1, +1
+
+    def update(self, excess_amps, duration_threshold=300):  ## 300  100
+        now = time.time()
+        direction = 0
+        if excess_amps > self.high_threshold:
+            direction = +1
+        elif excess_amps < self.low_threshold:
+            direction = -1
+        if self.prev_direction != direction or direction == 0:
+            self.prev_time = now
+        duration = now - self.prev_time
+        print(f"⏳{duration:.1f}s", end=" ")
+        self.prev_direction = direction
+        if duration > duration_threshold:
+            self.prev_time = now
+            if direction == +1:
+                return "START"
+            elif direction == -1:
+                return ("STOP")
 
 
 if __name__ == '__main__': 
