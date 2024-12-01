@@ -138,7 +138,7 @@ class SolarExcessCharger:
                 print(f"| 🚗💤")
                 return
             elif self.tesla_ble.cable_state == "Disconnected":
-                print("SKIP ∵ ⚡Disconnected")
+                print("| SKIP ∵ ⚡Disconnected")
                 return
 
         print("|", end=" ")
