@@ -105,7 +105,7 @@ class SolarExcessCharger:
             self.sleep_time = self.sleep_time_active
 
         produced_current = self.solaredge.check_production(currentPowerFlow)
-        print("☀️" if pv_status == "Active" else "🌙", end="")
+        print("🌞" if pv_status == "Active" else "🌙", end="")
         print(f"{produced_current:.2f}A", end=" ")
         # {'siteCurrentPowerFlow': {'updateRefreshRate': 3, 'unit': 'kW', 'connections': [{'from': 'GRID', 'to': 'Load'}], 'GRID': {'status': 'Active', 'currentPower': 0.55}, 'LOAD': {'status': 'Active', 'currentPower': 0.55}, 'PV': {'status': 'Idle', 'currentPower': 0.0}}}
 
