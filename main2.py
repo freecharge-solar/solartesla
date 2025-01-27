@@ -126,19 +126,36 @@ class SolarExcessCharger:
             self.tesla_ble.reset()
             return
         else:
-            print(f"🏠True", end=" ")
-            if self.tesla_ble.sleeping:
-                ## ideally, check if vehicle needs to be awoken to check if need to start/stop
-                ## however, for now, just skip because we can't start/stop anyways
-                print(f"| 🚗💤")
-                return
-            elif self.tesla_ble.charging_state == "Disconnected":
-                print("| SKIP ∵ ⚡Disconnected")
-                return
+            print(f"🏠True |", end=" ")
 
-        print("|", end=" ")
+        if self.tesla_ble.sleeping:
+            ## ideally, check if vehicle needs to be awoken to check if need to start/stop
+            ## however, for now, just skip because we can't start/stop anyways
+            print(f"🚗💤")
+            return
+        
+        print(f"🔋{self.tesla_ble.battery_level}%/{1.60934 * self.tesla_ble.battery_range:.0f}km", end=" ")
+        print(f"🔌{self.tesla_ble.charging_state}", end=" ")
 
-                
+        if self.tesla_ble.charging_state == "Disconnected":
+            print("| SKIP ∵ ⚡Disconnected")
+            return
+
+        # This block determines whether to start/stop charging
+        action = self.charge_manager.update(excess_current)
+        if action == "START":
+            if self.tesla_ble.charging_state == "Stopped":
+                print("START!", end=" ")
+                self.tesla_ble.guess_charging_start()
+            else:
+                print("ALREADY STARTED!", end=" ")
+        elif action == "STOP":
+            if self.tesla_ble.charging_state == "Charging":
+                print("STOP!", end=" ")
+                self.tesla_ble.guess_charging_stop()
+            else:
+                print("ALREADY STOPPED!", end=" ")
+
         ### In the case of manually stopping charging from Tesla App ...
         ### We guess that charging has stopped when the charge_amps set is more than the load_current(amps) used by the entire house
         ### When we guess that charging has stopped, we can actually issue a charge_stop command
@@ -172,33 +189,30 @@ class SolarExcessCharger:
         ###
 
         charge_current_request_max = self.tesla_ble.charge_current_request_max
-
         charge_amps = self.tesla_ble.charge_current_request
-
-        print(f"⚡{self.tesla_ble.charging_state}", end=" ")
         charger_actual_current = self.tesla_ble.charger_actual_current
+        charge_limit_soc = self.tesla_ble.charge_limit_soc
+        charger_power = self.tesla_ble.charger_power
+        charger_voltage = self.tesla_ble.charger_voltage
+        charger_phases = self.tesla_ble.charger_phases
 
-        print(f"{charger_actual_current}/{charge_amps}/{charge_current_request_max}A", end=" | ")
+        print(f"⭕{charge_limit_soc}% ⚡{charger_actual_current}/{charge_amps}/{charge_current_request_max}A {charger_power}kW {charger_voltage}V ({charger_phases})", end=" | ")
 
+        if self.tesla_ble.charging_state == "Complete":
+            print("| SKIP ∵ ⚡Complete")
+            return
+        if self.tesla_ble.charging_state == "Stopped":
+            print("| SKIP ∵ ⚡Stopped")
+            return
+            
         new_charge_amps = math.floor(charger_actual_current + excess_current)
         print(f"🎯{new_charge_amps}A", end=" ")
         print("|", end=" ")
 
-        # This block determines whether to start/stop charging
-        action = self.charge_manager.update(excess_current)
-        if action == "START":
-            if self.tesla_ble.charging_state == "Stopped":
-                print("START!", end=" ")
-                self.tesla_ble.guess_charging_start()
-            else:
-                print("ALREADY STARTED!", end=" ")
-        elif action == "STOP":
-            if self.tesla_ble.charging_state == "Charging":
-                print("STOP!", end=" ")
-                self.tesla_ble.guess_charging_stop()
-            else:
-                print("ALREADY STOPPED!", end=" ")
-            
+        if new_charge_amps == charger_actual_current:
+            print("")
+            return
+
         new_charge_amps = min(charge_current_request_max, max(0, new_charge_amps), math.floor(produced_current))
         try:
             time.sleep(3)  # ensure there's a gap between sending ble commands
@@ -274,6 +288,12 @@ class TeslaBLE:
         self.charger_actual_current = None
         self.charge_current_request = None
         self.charge_current_request_max = None
+        self.battery_level = None
+        self.battery_range = None
+        self.charge_limit_soc = None
+        self.charger_power = None
+        self.charger_voltage = None
+        self.charger_phases = None
 
     def guess_state(self):
         # Home or Away
@@ -299,6 +319,7 @@ class TeslaBLE:
             # # {'Disconnected': {}}
             # # {'Starting': {}}
             # print("chargeLimitSoc", json_response["chargeState"]["chargeLimitSoc"])
+            # print("batteryRange", json_response["chargeState"]["batteryRange"])
             # print("batteryLevel", json_response["chargeState"]["batteryLevel"])
             # print("chargerVoltage", json_response["chargeState"]["chargerVoltage"])
             # print("chargerPilotCurrent", json_response["chargeState"]["chargerPilotCurrent"])
@@ -311,12 +332,19 @@ class TeslaBLE:
             self.charger_actual_current = json_response["chargeState"]["chargerActualCurrent"]
             self.charge_current_request = json_response["chargeState"]["chargeCurrentRequest"]
             self.charge_current_request_max = json_response["chargeState"]["chargeCurrentRequestMax"]
-        elif p.stderr.startswith(b"Couldn't verify success: context deadline exceeded") or \
-             p.stderr.startswith(b"Error: context deadline exceeded"):
+            self.battery_level = json_response["chargeState"]["batteryLevel"]
+            self.battery_range = json_response["chargeState"]["batteryRange"]
+            self.charge_limit_soc = json_response["chargeState"]["chargeLimitSoc"]
+            self.charger_power = json_response["chargeState"]["chargerPower"]
+            self.charger_voltage = json_response["chargeState"]["chargerVoltage"]
+            self.charger_phases = json_response["chargeState"].get("chargerPhases", None)
+        elif p.stderr.startswith(b"Couldn't verify success: context deadline exceeded"):
+            #  p.stderr.startswith(b"Error: context deadline exceeded"):  # after Dec 2024 tesla ble changes, this happens when car is out of range / not at home
             # this happens when car is sleeping
             self.home = True
             self.sleeping = True
-        elif p.stderr.startswith(b"Error: failed to find BLE beacon"):
+        elif p.stderr.startswith(b"Error: failed to find BLE beacon") or \
+             p.stderr.startswith(b"Error: context deadline exceeded"):  # after Dec 2024 tesla ble changes, this happens when car is out of range / not at home
             # probably not at home, but should try a few times in case we have bad signal
             self.home = False
         else:
