@@ -109,6 +109,10 @@ class SolarExcessCharger:
         print(f"💡{load_current:.2f}A", end=" ")
         print(f"{excess_current:+.2f}A", end=" | ")
 
+        # charge_manager is responsible for keeping time of to/from grid direction
+        # this is used to determine when to start/stop charging, and even to wake up the car to start charging
+        self.charge_manager.update(excess_current)
+
         ## 29/01/2025 keep checking car state throughout the night, which doesn't wake it up anymore
         # if pv_status == "Idle":
         #     ## ideally, check if vehicle is still charging and stop it
@@ -129,10 +133,21 @@ class SolarExcessCharger:
         else:
             print(f"🏠True |", end=" ")
 
+        duration_threshold = 300
+
         if self.tesla_ble.sleeping:
-            ## ideally, check if vehicle needs to be awoken to check if need to start/stop
-            ## however, for now, just skip because we can't start/stop anyways
-            print(f"🚗💤")
+            print(f"🚗💤", end=" ")
+            # check if vehicle needs to be awoken if need to start
+            if self.charge_manager.prev_direction == +1:
+                print(f"⏳{self.charge_manager.prev_duration:.1f}s", end=" ")
+                if self.charge_manager.prev_duration > duration_threshold:
+                    print("WAKE!", end=" ")
+                    self.tesla_ble.guess_wake()
+                    print("START!", end=" ")
+                    self.tesla_ble.guess_charging_start()
+                    print("")
+                    return
+            print("| SKIP ∵ 🚗💤")
             return
         
         print(f"🔋{self.tesla_ble.battery_level}%/{1.60934 * self.tesla_ble.battery_range:.0f}km", end=" ")
@@ -141,21 +156,6 @@ class SolarExcessCharger:
         if self.tesla_ble.charging_state == "Disconnected":
             print("| SKIP ∵ ⚡Disconnected")
             return
-
-        # This block determines whether to start/stop charging
-        self.charge_manager.update(excess_current)
-        # if action == "START":
-        #     if self.tesla_ble.charging_state == "Stopped":
-        #         print("START!", end=" ")
-        #         self.tesla_ble.guess_charging_start()
-        #     else:
-        #         print("ALREADY STARTED!", end=" ")
-        # elif action == "STOP":
-        #     if self.tesla_ble.charging_state == "Charging":
-        #         print("STOP!", end=" ")
-        #         self.tesla_ble.guess_charging_stop()
-        #     else:
-        #         print("ALREADY STOPPED!", end=" ")
 
         ### In the case of manually stopping charging from Tesla App ...
         ### We guess that charging has stopped when the charge_amps set is more than the load_current(amps) used by the entire house
@@ -203,10 +203,9 @@ class SolarExcessCharger:
             print("| SKIP ∵ ⚡Complete")
             return
 
-        duration_threshold = 300
         if self.tesla_ble.charging_state == "Stopped":
             if self.charge_manager.prev_direction == +1:
-                print(f"⏳{self.charge_manager.prev_time:.1f}s", end=" ")
+                print(f"⏳{self.charge_manager.prev_duration:.1f}s", end=" ")
                 if self.charge_manager.prev_duration > duration_threshold:
                     print("START!", end=" ")
                     self.tesla_ble.guess_charging_start()
@@ -216,7 +215,7 @@ class SolarExcessCharger:
             return
         if self.tesla_ble.charging_state == "Charging":
             if self.charge_manager.prev_direction == -1:
-                print(f"⏳{self.charge_manager.prev_time:.1f}s", end=" ")
+                print(f"⏳{self.charge_manager.prev_duration:.1f}s", end=" ")
                 if self.charge_manager.prev_duration > duration_threshold:
                     print("STOP!", end=" ")
                     self.tesla_ble.guess_charging_stop()
@@ -390,15 +389,18 @@ class TeslaBLE:
 
         return p
 
+    def guess_wake(self):
+        p = self.run_retryIfCommonError(5, self.wake)
+        print(p.stderr, end=" ")
+        print(p.returncode, end=" ")
+
     def guess_charging_start(self):
         p = self.run_retryIfCommonError(5, self.charging_start)
-        # self.charge_state = "Charging"
         print(p.stderr, end=" ")
         print(p.returncode, end=" ")
 
     def guess_charging_stop(self):
         p = self.run_retryIfCommonError(5, self.charging_stop)
-        # self.charge_state = "Stopped"
         print(p.stderr, end=" ")
         print(p.returncode, end=" ")
 
@@ -453,6 +455,10 @@ class TeslaBLE:
 
     def charging_set_amps(self, amps):
         p = subprocess.run(["tesla-control", "-ble", "charging-set-amps", str(amps)], capture_output=True, timeout=30)
+        return p
+
+    def wake(self):
+        p = subprocess.run(["tesla-control", "-ble", "wake"], capture_output=True, timeout=30)
         return p
 
     def charging_start(self):
