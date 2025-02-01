@@ -49,7 +49,7 @@ class SolarEdgeMonitoring:
         return json_response
 
     def get_site_currentPowerFlow(self):
-        response = self.session.get(f"{self.URL}/site/{self.site}/currentPowerFlow?api_key={self.key}")
+        response = self.session.get(f"{self.URL}/site/{self.site}/currentPowerFlow?api_key={self.key}", timeout=30)
         response.raise_for_status()
         json_response = response.json()
         return json_response
@@ -157,38 +157,6 @@ class SolarExcessCharger:
             print("| SKIP ∵ ⚡Disconnected")
             return
 
-        ### In the case of manually stopping charging from Tesla App ...
-        ### We guess that charging has stopped when the charge_amps set is more than the load_current(amps) used by the entire house
-        ### When we guess that charging has stopped, we can actually issue a charge_stop command
-        ### The charge_stop command will output stderr to confirm that charging has indeed stopped:
-        ### Failed to execute command: car could not execute command: not_charging
-        ### If the charging was not actually stopped, that will force it to stop anyways
-        ### So we should be confident that the state is actually stopped
-        ###
-        ### In the case of manually starting charging from Tesla App ...
-        ### Unfortunately, we don't have a way to guess that charging has started.
-        ###
-        ### So maybe the algorithm should just not care about the state of charging or stopped
-        ### As in, the algorithm explicitly sends start and stop commands to determine the state 
-        ### A simple rule would be to always issue a stop command when solar generation is idle
-        ### Another simple rule would be to issue a stop command when target charge amps is 5A and negative excess for 5 minutes
-        ### That way, even if manually starting charging from Tesla App, the algorithm ends up stopping if necessary
-        ###
-        ### Every 15 seconds:
-        ### If the last 5 minutes have been positive excess (>5A), then start charging
-        ### If the last 5 minutes have been negative excess (<0A), then stop charging
-        ### Note: The charge rate is automatically adjusted each cycle too
-        ###
-        ### One complication is we want to minimise the number of BLE commands to send each cycle.
-        ### Currently we already send 2 BLE commands: one to guess state, and one to guess set charge amps
-        ### Think of a way to achieve start/stop when needed, but without issuing 3 commands in the cycle
-        ### It's ok to send 3 commands if it is seldom, but keep regular cycles to 2 commands only
-        ###
-        ### What could go wrong?
-        ### Need to make sure we don't flip-flop between charging and stopped because it is probably bad for the car
-        ### 5 minutes positive, start charging, 5 minutes negative, stop charging, 5 minutes positive, start charging
-        ###
-
         charge_current_request_max = self.tesla_ble.charge_current_request_max
         charge_amps = self.tesla_ble.charge_current_request
         charger_actual_current = self.tesla_ble.charger_actual_current
@@ -213,7 +181,7 @@ class SolarExcessCharger:
                     return
             print("| SKIP ∵ ⚡Stopped")
             return
-        if self.tesla_ble.charging_state == "Charging":
+        if self.tesla_ble.charging_state == "Charging" and pv_status == "Idle":
             if self.charge_manager.prev_direction == -1:
                 print(f"⏳{self.charge_manager.prev_duration:.1f}s", end=" ")
                 if self.charge_manager.prev_duration > duration_threshold:
