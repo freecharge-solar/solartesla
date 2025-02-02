@@ -90,6 +90,12 @@ class SolarExcessCharger:
     def runonce(self):
         print(f"{datetime.now().isoformat(timespec='seconds')}", end=" | ")
 
+        try:
+            self.tesla_ble.guess_state()
+        except subprocess.TimeoutExpired as e:
+            print("TimeoutExpired:", e)
+            return
+        
         currentPowerFlow = self.solaredge.get_site_currentPowerFlow()
 
         pv_status = self.solaredge.check_status(currentPowerFlow)
@@ -120,12 +126,6 @@ class SolarExcessCharger:
         #     print("SKIP ∵ 🌙")
         #     return
 
-        try:
-            self.tesla_ble.guess_state()
-        except subprocess.TimeoutExpired as e:
-            print("TimeoutExpired:", e)
-            return
-        
         if not self.tesla_ble.home:
             print("🏠False | SKIP ∵ 🏠False")
             self.tesla_ble.reset()
@@ -200,7 +200,6 @@ class SolarExcessCharger:
 
         new_charge_amps = min(charge_current_request_max, max(0, new_charge_amps), math.floor(produced_current))
         try:
-            time.sleep(3)  # ensure there's a gap between sending ble commands
             p = self.tesla_ble.guess_charging_set_amps(new_charge_amps)
             if p.returncode == 0:
                 print(f"⚡→{new_charge_amps}A")
@@ -228,6 +227,8 @@ class SolarExcessCharger:
                 else:
                     print(str(e))
             except requests.exceptions.ConnectionError as e:
+                print(str(e))
+            except requests.exceptions.ReadTimeout as e:
                 print(str(e))
             elapsed_time = time.time() - start_time
             sleep_time = max(0, self.sleep_time - elapsed_time)
