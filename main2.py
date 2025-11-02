@@ -230,6 +230,8 @@ class SolarExcessCharger:
                 print(str(e))
             except requests.exceptions.ReadTimeout as e:
                 print(str(e))
+            except requests.exceptions.JSONDecodeError as e:
+                print(str(e))
             elapsed_time = time.time() - start_time
             sleep_time = max(0, self.sleep_time - elapsed_time)
             time.sleep(sleep_time)
