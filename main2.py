@@ -154,7 +154,7 @@ class SolarExcessCharger:
         print(f"🔌{self.tesla_ble.charging_state}", end=" ")
 
         if self.tesla_ble.charging_state == "Disconnected":
-            print("| SKIP ∵ ⚡Disconnected")
+            print("| SKIP ∵ 🔌Disconnected")
             return
 
         charge_current_request_max = self.tesla_ble.charge_current_request_max
@@ -379,7 +379,12 @@ class TeslaBLE:
         attempt = 0
         p = None
         while attempt <= retry:
-            p = func()
+            try:
+                p = func()
+            except subprocess.TimeoutExpired:
+                print(attempt, end="subprocess.TimeoutExpired ")
+                attempt += 1
+                continue
             if p.returncode == 0:
                 # success!
                 return p
