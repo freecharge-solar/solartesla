@@ -15,9 +15,10 @@ class SolarEdgeMonitoring:
 
     URL = "https://monitoringapi.solaredge.com"
 
-    def __init__(self, site, key):
+    def __init__(self, site, key, cookie):
         self.site = site
         self.key = key
+        self.cookie = cookie
         self.session = requests.Session()
 
     def reset(self):
@@ -49,7 +50,8 @@ class SolarEdgeMonitoring:
         return json_response
 
     def get_site_currentPowerFlow(self):
-        response = self.session.get(f"{self.URL}/site/{self.site}/currentPowerFlow?api_key={self.key}", timeout=30)
+        url = f"https://monitoring.solaredge.com/services/powerflow/site/{self.site}/latest"
+        response = self.session.get(url, headers={"Cookie": self.cookie})
         response.raise_for_status()
         json_response = response.json()
         return json_response
@@ -57,21 +59,21 @@ class SolarEdgeMonitoring:
     def check_status(self, currentPowerFlow=None):
         if currentPowerFlow is None:
             currentPowerFlow = self.get_site_currentPowerFlow()
-        pv_status = currentPowerFlow["siteCurrentPowerFlow"]["PV"]["status"]
+        pv_status = currentPowerFlow["pv"]["status"]
         return pv_status
 
     def check_production(self, currentPowerFlow=None):
         if currentPowerFlow is None:
             currentPowerFlow = self.get_site_currentPowerFlow()
-        produced_power = currentPowerFlow["siteCurrentPowerFlow"]["PV"]["currentPower"]
+        produced_power = currentPowerFlow["pv"]["currentPower"]
         power_amps = 1000 * produced_power / 230
         return power_amps
 
     def check_excess(self, currentPowerFlow=None):
         if currentPowerFlow is None:
             currentPowerFlow = self.get_site_currentPowerFlow()
-        grid_power = (currentPowerFlow["siteCurrentPowerFlow"]["GRID"]["currentPower"])
-        if {'from': 'GRID', 'to': 'Load'} in currentPowerFlow["siteCurrentPowerFlow"]["connections"]:
+        grid_power = (currentPowerFlow["grid"]["currentPower"])
+        if {'from': 'Grid', 'to': 'Load'} in currentPowerFlow["connections"]:
             grid_power = -grid_power
         power_amps = 1000 * grid_power / 230
         return power_amps
@@ -95,7 +97,7 @@ class SolarExcessCharger:
         except subprocess.TimeoutExpired as e:
             print("TimeoutExpired:", e)
             return
-        
+
         currentPowerFlow = self.solaredge.get_site_currentPowerFlow()
 
         pv_status = self.solaredge.check_status(currentPowerFlow)
@@ -478,5 +480,5 @@ class ChargingManager:
 
 if __name__ == '__main__': 
     from config import *
-    solartesla = SolarExcessCharger(SOLAREDGE_SITE, SOLAREDGE_KEY)
+    solartesla = SolarExcessCharger(SOLAREDGE_SITE, SOLAREDGE_KEY, SOLAREDGE_COOKIE)
     solartesla.loop()
