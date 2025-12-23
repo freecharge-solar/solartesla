@@ -80,8 +80,8 @@ class SolarEdgeMonitoring:
 
 
 class SolarExcessCharger:
-    def __init__(self, solaredge_site, solaredge_key):
-        self.solaredge = SolarEdgeMonitoring(solaredge_site, solaredge_key)
+    def __init__(self, solaredge_site, solaredge_key, solaredge_cookie):
+        self.solaredge = SolarEdgeMonitoring(solaredge_site, solaredge_key, solaredge_cookie)
         self.tesla_ble = TeslaBLE()
         self.charge_manager = ChargingManager()
 
