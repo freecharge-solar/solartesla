@@ -4,7 +4,9 @@ from datetime import datetime
 import json
 import math
 import requests
+import secrets
 import time
+import urllib
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -13,10 +15,10 @@ warnings.filterwarnings("ignore")
 # logging.basicConfig(level=logging.DEBUG, format="%(message)s")
 
 class TeslaAuth:
-    TOKEN_URL = "https://auth.tesla.com/oauth2/v3/token"
     AUTHORIZE_URL = "https://auth.tesla.com/oauth2/v3/authorize"
-    AUDIENCE = "https://fleet-api.prd.na.vn.cloud.tesla.com"
-    CALLBACK = "https://freecharge-solar.github.io/index.html"
+    AUDIENCE      = "https://fleet-api.prd.na.vn.cloud.tesla.com"
+    TOKEN_URL     = "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token"
+    CALLBACK      = "https://freecharge-solar.github.io/callback.html"
 
     def __init__(self, tesla_client_id, tesla_client_secret):
         self.tesla_client_id = tesla_client_id
@@ -35,12 +37,46 @@ class TeslaAuth:
         with open("token.json", "w") as f:
             f.write(json.dumps(self.token))
 
-    def get_third_party_url(self):
-        response = self.session.get(self.AUTHORIZE_URL,
-                                     headers={"Content-Type": "application/x-www-form-urlencoded"},
-                                     params=f"client_id={self.tesla_client_id}&locale=en-US&prompt=login&redirect_uri={self.CALLBACK}&response_type=code&scope=openid%20offline_access%20user_data%20vehicle_device_data vehicle_cmds%20vehicle_charging_cmds&state=jaskldfjasdfasdf")
-        response.raise_for_status()
-        return response.request.url
+    def generate_auth_url(self):
+        self.state = secrets.token_urlsafe(32)
+        params = {
+            "client_id": self.tesla_client_id,
+            "redirect_uri" :self.CALLBACK,
+            "response_type": "code",
+            "scope": "openid offline_access user_data vehicle_device_data vehicle_cmds vehicle_charging_cmds",
+            "state": self.state
+        }
+        auth_url = self.AUTHORIZE_URL + "?" + urllib.parse.urlencode(params)
+        return auth_url
+
+    def login(self):
+        auth_url = self.generate_auth_url()
+        print("Please go to the following URL and authorize the application:")
+        print(auth_url)
+        full_url = input("Enter the full URL from the redirect: ")
+        code = self.parse_redirect(full_url)
+        if not code:
+            print("Failed to retrieve valid code from redirect URL.")
+            return
+        
+        token = self.get_third_party_token(code)
+        print("Login successful. Access token obtained.")
+        self.token = token
+        self.save()
+        print("Token saved to token.json.")
+
+    def parse_redirect(self, full_url):
+        # Parse the full_url to extract the code and check state
+        parsed_url = urllib.parse.urlparse(full_url)
+        query_params = urllib.parse.parse_qs(parsed_url.query)
+        code = query_params.get("code", [None])[0]
+        returned_state = query_params.get("state", [None])[0]
+        if returned_state != self.state:
+            print("State does not match! Possible CSRF attack.")
+            return
+        
+        print(f"Received code: {code}")
+        return code
 
     def get_partner_access_token(self):
         response = self.session.post(self.TOKEN_URL,
@@ -66,7 +102,9 @@ class TeslaAuth:
                                            "audience": self.AUDIENCE,
                                            "redirect_uri": self.CALLBACK})
         json_response = response.json()
-        # response.raise_for_status()
+        response.raise_for_status()
+        self.token = json_response
+        self.save()
         return json_response
 
     def get_new_token(self):
@@ -83,10 +121,8 @@ class TeslaAuth:
         return json_response
 
 
-
-
 class TeslaAPI:
-    URL = "https://localhost"
+    URL = TeslaAuth.AUDIENCE
 
     def __init__(self, tesla_id, tesla_vin, tesla_auth, home=(0, 0)):
         self.tesla_id = tesla_id
@@ -152,10 +188,14 @@ class TeslaAPI:
         return json_response
 
     def get_vehicle_data(self):
-        url = f"{self.URL}/api/1/vehicles/{self.tesla_vin}/vehicle_data"
-        response = self.session.get(url, timeout=1, params={"endpoints": "charge_state;location_data"})
+        url = f"{self.URL}/api/1/vehicles/{self.tesla_id}/vehicle_data"
+        response = self.session.get(url, timeout=2)
         response.raise_for_status()
         json_response = response.json()
+        return json_response
+    
+    def get_vehicle_data2(self):
+        json_response = self.get_vehicle_data()
         self.get_vehicle_location(json_response)
         charging_state = json_response["response"]["charge_state"]["charging_state"]
         if charging_state == "Disconnected":
